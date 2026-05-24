@@ -116,7 +116,7 @@ header {
   width: 90%; max-width: 500px; padding: 20px; display: flex; flex-direction: column; gap: 15px;
 }
 
-/* ⚙️ FULL SCREEN SETTINGS SYSTEM (NEW PARADIGM) */
+/* ⚙️ FULL SCREEN SETTINGS SYSTEM */
 .settings-screen {
   position: fixed; inset: 0; background: var(--bg); z-index: 1000;
   display: none; flex-direction: column; padding: 20px; overflow-y: auto;
@@ -194,7 +194,6 @@ header {
     <span id="sLbl">Initializing...</span>
   </div>
   <div class="hdr-actions">
-    <!-- Dedicated Settings Toggle Button -->
     <button class="btn-hdr" onclick="toggleSettingsScreen(true)">
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       Settings
@@ -209,7 +208,7 @@ header {
 </div>
 
 <div class="workspace">
-  <!-- Center: Chat Window (Occupies left/center space beautifully) -->
+  <!-- Center: Chat Window -->
   <div class="chat-container active">
     <div class="feed" id="feed">
       <div class="msg sys"><div class="bubble">System ready. Enter query below. Prompt uses instruction training format.</div></div>
@@ -274,7 +273,7 @@ header {
         <span>Hyperparameters</span>
         <span id="paramCountDisplay" style="font-family:'JetBrains Mono'; font-size:0.65rem; color:var(--accent);">0 params</span>
       </div>
-      <div class="param-row" title="Hidden dimension size of the internal matrices. Higher = larger memory capability.">
+      <div class="param-row">
         <span>Hidden Size (HS):</span>
         <input type="number" id="paramHS" class="param-input" value="32" min="8" max="512" oninput="changeModelShape()">
       </div>
@@ -286,15 +285,15 @@ header {
         <span>Momentum:</span>
         <input type="number" id="paramMOM" class="param-input" value="0.9" step="0.05" min="0.1" max="0.99">
       </div>
-      <div class="param-row" title="Divides logit input values to control temperature. Lower values = highly focused answers.">
+      <div class="param-row">
         <span>Temperature (Temp):</span>
         <input type="number" id="paramTemp" class="param-input" value="0.3" step="0.1" min="0.1" max="1.5">
       </div>
-      <div class="param-row" title="Restricts token sampling to top K candidates.">
+      <div class="param-row">
         <span>Top-K:</span>
         <input type="number" id="paramTopK" class="param-input" value="5" min="0" max="95">
       </div>
-      <div class="param-row" title="Cumulative probability threshold (Nucleus).">
+      <div class="param-row">
         <span>Top-P (Nucleus):</span>
         <input type="number" id="paramTopP" class="param-input" value="0.9" step="0.05" min="0.1" max="1.0">
       </div>
@@ -305,8 +304,14 @@ header {
       <button class="btn-action r" onclick="resetToSystemDefaults()">🔄 Reset to Baseline</button>
     </div>
 
-    <!-- Group 3: Visualization & Weight Controllers -->
+    <!-- Group 3: Visualization, Weight Controllers & WASM Status -->
     <div class="settings-group">
+      <div class="settings-group-hdr">Engine Status</div>
+      <div class="param-row" style="margin-bottom: 8px;">
+        <span>WASM Acceleration:</span>
+        <span id="wasmStatusDisplay" style="font-weight: 700; color: var(--text-muted);">Checking...</span>
+      </div>
+
       <div class="settings-group-hdr">Lab Visualization</div>
       <button class="btn-action g" style="margin-bottom:10px;" onclick="toggleNNModal(true)">🧠 View Neural Graph</button>
       
@@ -346,7 +351,35 @@ const randNum=()=>(Math.random()-.5)*.1;
 const fillMatrix=(r,c)=>Array.from({length:r},()=>Array.from({length:c},randNum));
 const zeroVector=n=>new Array(n).fill(0);
 const zeroMatrix=(r,c)=>Array.from({length:r},()=>new Array(c).fill(0));
-const sig=x=>1/(1+Math.exp(-x)), th=x=>Math.tanh(x);
+
+/* ══ WEBASSEMBLY HYBRID FALLBACK LOADER ════════════════════════════════════ */
+let wasmInstance = null;
+
+async function loadWasmEngine() {
+  const statusEl = document.getElementById('wasmStatusDisplay');
+  try {
+    // Fetches the release.wasm binary compiled inside your directory
+    const response = await fetch('release.wasm');
+    const bytes = await response.arrayBuffer();
+    
+    // Instantiates the WASM binary safely on any smartphone browser
+    const { instance } = await WebAssembly.instantiate(bytes);
+    wasmInstance = instance;
+    
+    statusEl.textContent = "ACTIVE ⚡";
+    statusEl.style.color = "var(--green)";
+    cLog('ok', '✓ WebAssembly High-Performance Math Engine loaded.');
+  } catch (err) {
+    // Fail gracefully: Use the built-in fast JS math fallback
+    statusEl.textContent = "JS FALLBACK 💤";
+    statusEl.style.color = "var(--accent)";
+    cLog('warn', '⚠ WASM load failed (using JS math fallback): ' + err.message);
+  }
+}
+
+// Math interfaces targeting either WASM or native JS libraries [5]
+const sig = x => wasmInstance ? wasmInstance.exports.sigmoidWasm(x) : 1 / (1 + Math.exp(-x));
+const th = x => wasmInstance ? wasmInstance.exports.tanhWasm(x) : Math.tanh(x);
 
 /* ══ RECURRENT NEURAL NETWORK INSTANCE ════════════════════════════════════ */
 function createLSTMInstance() {
@@ -639,18 +672,15 @@ function switchMobileTab(tabId) {
   }
 }
 
-// Ensure proper display on resize
 window.addEventListener('resize', () => {
   if (window.innerWidth > 768) {
     document.querySelector('.chat-container').classList.add('active');
     document.querySelector('.sandbox').classList.add('active');
   } else {
-    // Default to chat view on mobile if resized down
     switchMobileTab('chat');
   }
 });
 
-// Setup initial state based on layout size
 if (window.innerWidth <= 768) {
   switchMobileTab('chat');
 }
@@ -959,9 +989,9 @@ function updateStatus(state, label) {
 
 // Initial Boot Configuration
 calculateParamCount();
+loadWasmEngine(); // Fetch and load WASM binary safely on boot
 trainFromEditor();
 
-// Input Event Listener
 document.getElementById('userInput').addEventListener('keydown', (e) => {
   if (e.key === 'Enter') submitUserQuery();
 });
